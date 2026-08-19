@@ -1,0 +1,12 @@
+.DS_Store
+.env
+*.log
+node_modules/
+dist/
+.gradle/
+build/
+target/
+server/.gradle/
+server/build/
+web/node_modules/
+web/dist/

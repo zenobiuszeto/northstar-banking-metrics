@@ -1,0 +1,29 @@
+services:
+  postgres:
+    image: timescale/timescaledb:2.17.2-pg16
+    environment:
+      POSTGRES_DB: northstar
+      POSTGRES_USER: northstar
+      POSTGRES_PASSWORD: northstar
+    ports: ["5432:5432"]
+    volumes: ["northstar-data:/var/lib/postgresql/data"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U northstar -d northstar"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+  api:
+    build: ./server
+    environment:
+      DATABASE_URL: jdbc:postgresql://postgres:5432/northstar
+      DATABASE_USER: northstar
+      DATABASE_PASSWORD: northstar
+    depends_on:
+      postgres:
+        condition: service_healthy
+  web:
+    build: ./web
+    ports: ["3000:80"]
+    depends_on: [api]
+volumes:
+  northstar-data:

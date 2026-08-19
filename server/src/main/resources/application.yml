@@ -1,0 +1,16 @@
+spring:
+  datasource:
+    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/northstar}
+    username: ${DATABASE_USER:northstar}
+    password: ${DATABASE_PASSWORD:northstar}
+  jpa:
+    hibernate:
+      ddl-auto: update
+  sql:
+    init:
+      mode: always
+server:
+  port: 8080
+app:
+  seed:
+    enabled: ${SEED_DEMO_DATA:true}
