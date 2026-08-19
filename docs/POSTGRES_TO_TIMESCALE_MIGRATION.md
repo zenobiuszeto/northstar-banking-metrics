@@ -44,7 +44,7 @@ If company source names differ, create a staging view that exposes the columns e
 1. Provision an empty TimescaleDB target and enable encrypted connections.
 2. Stop the application seed with `SEED_DEMO_DATA=false`; production data must never be mixed with demo data.
 3. Run preflight counts, date-range checks, duplicate checks, and source-to-target type mapping.
-4. Run the supplied `scripts/migrate-postgres-to-timescale.sh` from the repository root.
+4. Run the supplied `scripts/migrate-postgres-to-timescale.sh` from the repository root. It applies the same versioned baseline schema used by Flyway before loading data.
 5. Validate row counts, transaction totals, min/max timestamps, null rates, and a sample of customer-account-transaction joins.
 6. Run dashboard aggregate reconciliation against approved source reports.
 7. Point the Spring Boot application to the target only after business and technical sign-off.
@@ -103,6 +103,6 @@ where hypertable_name = 'transactions';
 
 - Replace demo credentials and disable automatic demo seeding.
 - Use TLS, least-privilege database roles, secret rotation, audit logging, and network allowlists.
-- Add Flyway or Liquibase migrations before the first production release; do not rely on ad hoc schema creation.
+- Review and promote the included Flyway migrations through the normal database change process; do not run ad hoc schema creation.
 - Define hypertable chunk intervals, compression/columnstore policy, retention, backups, and disaster recovery from measured data volume and query patterns.
 - Tokenize or mask customer identifiers in analytical environments unless clear-text access is explicitly approved.

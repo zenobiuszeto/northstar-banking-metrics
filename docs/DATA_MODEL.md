@@ -123,7 +123,9 @@ The running demo uses three physical tables:
 | `accounts` | Product relationship and current balance | Standard PostgreSQL table |
 | `transactions` | Dated deposits and payments | TimescaleDB hypertable partitioned by `occurred_at` |
 
-The remaining dashboard metrics are currently deterministic demo values returned by the API. They must be mapped to governed production facts before company use.
+The remaining dashboard metrics are currently deterministic demo values returned by the `DemoMetricsRepository` adapter. The repository port deliberately isolates that demo source from the application and HTTP layers, but it must be replaced by governed production facts before company use. Seeded transactions demonstrate storage and volume; they do not currently drive every displayed KPI.
+
+Schema changes are versioned under `server/src/main/resources/db/migration` and applied by Flyway. Application startup does not use Hibernate schema mutation.
 
 ## Recommended production tables
 

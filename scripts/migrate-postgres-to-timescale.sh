@@ -23,7 +23,7 @@ if [[ "$target_customer_count" != "0" ]]; then
   exit 1
 fi
 
-psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$project_root/server/src/main/resources/schema.sql"
+psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$project_root/server/src/main/resources/db/migration/V1__create_banking_schema.sql"
 
 psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_number,segment,region,risk_score,created_at from customers order by id) to '$migration_tmp/customers.csv' with (format csv, header true)"
 psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_id,product,status,balance,opened_at from accounts order by id) to '$migration_tmp/accounts.csv' with (format csv, header true)"

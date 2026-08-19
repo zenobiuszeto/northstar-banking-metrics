@@ -1,29 +1,52 @@
 services:
   postgres:
     image: timescale/timescaledb:2.17.2-pg16
+    restart: unless-stopped
     environment:
-      POSTGRES_DB: northstar
-      POSTGRES_USER: northstar
-      POSTGRES_PASSWORD: northstar
-    ports: ["5432:5432"]
+      POSTGRES_DB: ${POSTGRES_DB:-northstar}
+      POSTGRES_USER: ${POSTGRES_USER:-northstar}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-northstar-local}
+    ports: ["${POSTGRES_PORT:-5432}:5432"]
     volumes: ["northstar-data:/var/lib/postgresql/data"]
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U northstar -d northstar"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 5s
       timeout: 5s
       retries: 20
   api:
     build: ./server
+    restart: unless-stopped
     environment:
-      DATABASE_URL: jdbc:postgresql://postgres:5432/northstar
-      DATABASE_USER: northstar
-      DATABASE_PASSWORD: northstar
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-northstar}
+      DATABASE_USER: ${POSTGRES_USER:-northstar}
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:-northstar-local}
+      DATABASE_POOL_MAX_SIZE: ${DATABASE_POOL_MAX_SIZE:-10}
+      SEED_DEMO_DATA: ${SEED_DEMO_DATA:-true}
+      SEED_CUSTOMER_COUNT: ${SEED_CUSTOMER_COUNT:-100000}
+      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+      JAVA_TOOL_OPTIONS: ${JAVA_TOOL_OPTIONS:--XX:MaxRAMPercentage=75.0}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8080/actuator/health/readiness"]
+      interval: 15s
+      timeout: 3s
+      start_period: 45s
+      retries: 5
+    read_only: true
+    tmpfs: ["/tmp"]
   web:
     build: ./web
-    ports: ["3000:80"]
-    depends_on: [api]
+    restart: unless-stopped
+    ports: ["${WEB_PORT:-3000}:80"]
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
 volumes:
   northstar-data:
