@@ -1,7 +1,7 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? '';
 
 export async function fetchMetrics(product, {signal} = {}) {
-  const response = await fetch(`${API_BASE_URL}/api/metrics?product=${encodeURIComponent(product)}`, {
+  const response = await fetch(`${API_BASE_URL}/api/v1/metrics?product=${encodeURIComponent(product)}`, {
     headers: {Accept: 'application/json'}, signal,
   });
   if (!response.ok) {

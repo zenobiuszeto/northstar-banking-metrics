@@ -1,6 +1,11 @@
 package com.northstar.metrics.infrastructure.seed;
 
 import com.northstar.metrics.config.NorthstarProperties;
+import com.northstar.metrics.domain.BankingTransaction;
+import com.northstar.metrics.domain.Customer;
+import com.northstar.metrics.domain.DepositAccount;
+import com.northstar.metrics.domain.ProductApplication;
+import java.sql.Timestamp;
 import java.util.ArrayList;
 import java.util.List;
 import org.slf4j.Logger;
@@ -53,14 +58,16 @@ class DemoDataSeeder implements ApplicationRunner {
 
     seedReferenceData();
     log.info("Generating {} synthetic customers in batches of {}", properties.customerCount(), properties.batchSize());
-    batchRange(1, properties.customerCount(), factory::customer,
+    batchRange(1, properties.customerCount(), ordinal -> customerRow(factory.customer(ordinal)),
         "insert into customers(customer_number,segment,region,risk_score,created_at) values (?,?,?,?,?)");
 
     List<Long> customerIds = jdbc.queryForList("select id from customers order by id", Long.class);
     List<Object[]> applications = new ArrayList<>(properties.batchSize());
+    int applicationCount = Math.min(customerIds.size(), 18_462);
+    int generatedApplications = 0;
     for (long customerId : customerIds) {
-      if (customerId % 5 == 0) continue;
-      applications.add(factory.application(customerId));
+      if (generatedApplications++ >= applicationCount) break;
+      applications.add(applicationRow(factory.application(customerId)));
       flushWhenFull(applications, "insert into applications(customer_id,product_code,channel,status,submitted_at,decisioned_at,funded_at) values (?,?,?,?,?,?,?)");
     }
     flush(applications, "insert into applications(customer_id,product_code,channel,status,submitted_at,decisioned_at,funded_at) values (?,?,?,?,?,?,?)");
@@ -68,17 +75,24 @@ class DemoDataSeeder implements ApplicationRunner {
     List<Object[]> accounts = new ArrayList<>(properties.batchSize());
     for (long customerId : customerIds) {
       for (int ordinal = 0; ordinal < factory.accountCount(customerId); ordinal++) {
-        accounts.add(factory.account(customerId, ordinal));
+        accounts.add(accountRow(factory.account(customerId, ordinal)));
         flushWhenFull(accounts, "insert into accounts(customer_id,product_code,status,balance,opened_at) values (?,?,?,?,?)");
       }
     }
     flush(accounts, "insert into accounts(customer_id,product_code,status,balance,opened_at) values (?,?,?,?,?)");
+    jdbc.update("""
+        update accounts a set application_id=(select ap.id from applications ap
+          where ap.customer_id=a.customer_id and ap.product_code=a.product_code and ap.status='FUNDED'
+          order by ap.id limit 1)
+        where a.application_id is null and exists (select 1 from applications ap
+          where ap.customer_id=a.customer_id and ap.product_code=a.product_code and ap.status='FUNDED')
+        """);
 
     List<Long> accountIds = jdbc.queryForList("select id from accounts order by id", Long.class);
     List<Object[]> transactions = new ArrayList<>(properties.batchSize());
     for (long accountId : accountIds) {
       for (int ordinal = 0; ordinal < factory.transactionCount(accountId); ordinal++) {
-        transactions.add(factory.transaction(accountId, ordinal));
+        transactions.add(transactionRow(factory.transaction(accountId, ordinal)));
         flushWhenFull(transactions, "insert into transactions(account_id,amount,transaction_type,occurred_at,fraud_flag) values (?,?,?,?,?)");
       }
     }
@@ -143,6 +157,26 @@ class DemoDataSeeder implements ApplicationRunner {
       flushWhenFull(rows, sql);
     }
     flush(rows, sql);
+  }
+
+  private Object[] customerRow(Customer customer) {
+    return new Object[] {customer.customerNumber(), customer.segment().name(), customer.region(), customer.riskScore(), customer.createdAt()};
+  }
+
+  private Object[] accountRow(DepositAccount account) {
+    return new Object[] {account.customerId(), account.productCode().name(), account.status().name(),
+        account.balance().amount(), account.openedAt()};
+  }
+
+  private Object[] transactionRow(BankingTransaction transaction) {
+    return new Object[] {transaction.accountId(), transaction.amount().amount(), transaction.type().name(),
+        Timestamp.from(transaction.occurredAt()), transaction.fraudFlag()};
+  }
+
+  private Object[] applicationRow(ProductApplication application) {
+    return new Object[] {application.customerId(), application.productCode().name(), application.channel().name(),
+        application.status().name(), Timestamp.from(application.submittedAt()), Timestamp.from(application.decisionedAt()),
+        application.fundedAt() == null ? null : Timestamp.from(application.fundedAt())};
   }
 
   private void flushWhenFull(List<Object[]> rows, String sql) {

@@ -1,5 +1,6 @@
 package com.northstar.metrics.api;
 
+import com.fasterxml.jackson.annotation.JsonFormat;
 import java.math.BigDecimal;
 import java.time.Instant;
 
@@ -16,4 +17,4 @@ public record MetricsResponse(
     int atRiskCustomers,
     BigDecimal depositsAtRiskMillions,
     BigDecimal winBackRate,
-    Instant generatedAt) {}
+    @JsonFormat(shape = JsonFormat.Shape.STRING) Instant generatedAt) {}

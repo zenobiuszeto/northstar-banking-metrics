@@ -11,7 +11,7 @@ import org.springframework.web.bind.annotation.RestController;
 
 @Validated
 @RestController
-@RequestMapping("/api/metrics")
+@RequestMapping({"/api/v1/metrics", "/api/metrics"})
 public class MetricsController {
   private final MetricsQueryService service;
   private final MetricsResponseMapper mapper;

@@ -24,13 +24,21 @@ if [[ "$target_customer_count" != "0" ]]; then
 fi
 
 psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -f "$project_root/server/src/main/resources/db/migration/V1__create_banking_schema.sql"
+psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'
+insert into products(product_code,display_name,product_family,customer_type,active) values
+('BUSINESS_CHECKING','Business Checking','CHECKING','BUSINESS',true),
+('CONSUMER_CHECKING','Consumer Checking','CHECKING','CONSUMER',true),
+('BUSINESS_SAVINGS','Business Savings','SAVINGS','BUSINESS',true),
+('CONSUMER_SAVINGS','Consumer Savings','SAVINGS','CONSUMER',true)
+on conflict (product_code) do nothing;
+SQL
 
-psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_number,segment,region,risk_score,created_at from customers order by id) to '$migration_tmp/customers.csv' with (format csv, header true)"
-psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_id,product,status,balance,opened_at from accounts order by id) to '$migration_tmp/accounts.csv' with (format csv, header true)"
-psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,account_id,amount,transaction_type,occurred_at,fraud_flag from transactions order by occurred_at,id) to '$migration_tmp/transactions.csv' with (format csv, header true)"
+psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_number,upper(segment) as segment,region,risk_score,created_at from customers order by id) to '$migration_tmp/customers.csv' with (format csv, header true)"
+psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,customer_id,upper(replace(product,' ','_')) as product_code,upper(status) as status,balance,opened_at from accounts order by id) to '$migration_tmp/accounts.csv' with (format csv, header true)"
+psql "$SOURCE_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy (select id,account_id,amount,upper(transaction_type) as transaction_type,occurred_at,fraud_flag from transactions order by occurred_at,id) to '$migration_tmp/transactions.csv' with (format csv, header true)"
 
 psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy customers(id,customer_number,segment,region,risk_score,created_at) from '$migration_tmp/customers.csv' with (format csv, header true)"
-psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy accounts(id,customer_id,product,status,balance,opened_at) from '$migration_tmp/accounts.csv' with (format csv, header true)"
+psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy accounts(id,customer_id,product_code,status,balance,opened_at) from '$migration_tmp/accounts.csv' with (format csv, header true)"
 psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 -c "\copy transactions(id,account_id,amount,transaction_type,occurred_at,fraud_flag) from '$migration_tmp/transactions.csv' with (format csv, header true)"
 
 psql "$TARGET_DATABASE_URL" -v ON_ERROR_STOP=1 <<'SQL'

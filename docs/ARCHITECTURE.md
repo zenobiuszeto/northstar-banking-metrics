@@ -24,7 +24,7 @@ infrastructure adapters ───┘
 - `application`: focused queries/use cases plus projection, account, transaction, and metric-definition ports.
 - `infrastructure.metrics`: deterministic analytics projection and JDBC operational/lineage adapters.
 - `infrastructure.seed`: demo-only synthetic generation and persistence orchestration.
-- `api`: version-neutral `/api` compatibility endpoint, DTO mapping, validation, correlation, and safe problem responses.
+- `api`: versioned `/api/v1` endpoint plus a 1.x compatibility alias, DTO mapping, validation, correlation, and safe problem responses.
 
 Operational banking records are not dashboard DTOs. `AnalyticsProjectionRepository` is the CQRS-style read seam. `DailyAccountSnapshot` and `GovernedMetric` make lineage from operational facts to certified read models explicit; the current dashboard adapter remains `DEMO`, not certified.
 

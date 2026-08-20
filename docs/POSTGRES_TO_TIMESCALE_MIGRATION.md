@@ -33,11 +33,11 @@ The source database remains authoritative until validation and cutover are appro
 | Source concept | Target | Treatment |
 |---|---|---|
 | Customer master | `customers` | Standard PostgreSQL table |
-| Deposit accounts | `accounts` | Standard PostgreSQL table with customer foreign key |
+| Deposit accounts | `accounts` | Standard PostgreSQL table with customer and product foreign keys |
 | Transactions | `transactions` | TimescaleDB hypertable partitioned on `occurred_at` |
 | Transaction identifier | Composite primary key `(id, occurred_at)` | Timescale unique constraints must include the partition column |
 
-If company source names differ, create a staging view that exposes the columns expected by the migration script. This keeps source-specific transformations outside the target schema.
+If company source names differ, create a staging view that exposes the columns expected by the migration script. The supplied legacy example maps `accounts.product` to the new `product_code`; populate the four target product reference rows before account loading. Applications, fraud events, rates, snapshots, and governed metrics require source-specific follow-on pipelines and reconciliation; the sample script intentionally migrates only the legacy customer/account/transaction subset.
 
 ## One-time migration
 
