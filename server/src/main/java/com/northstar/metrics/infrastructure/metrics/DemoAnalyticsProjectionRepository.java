@@ -10,10 +10,10 @@ import java.util.Optional;
 import org.springframework.stereotype.Repository;
 
 @Repository
-public class DemoMetricsRepository implements AnalyticsProjectionRepository {
+public class DemoAnalyticsProjectionRepository implements AnalyticsProjectionRepository {
   private final Map<PortfolioScope, PortfolioMetrics> metrics;
 
-  public DemoMetricsRepository() {
+  public DemoAnalyticsProjectionRepository() {
     metrics = new EnumMap<>(PortfolioScope.class);
     metrics.put(PortfolioScope.ALL, row(PortfolioScope.ALL, 18_462, "71.8", "486.2", ".42", "1.9", "86.4", "1246"));
     metrics.put(PortfolioScope.BUSINESS_CHECKING, row(PortfolioScope.BUSINESS_CHECKING, 4_218, "74.2", "184.6", ".31", "1.1", "91.2", "3210"));

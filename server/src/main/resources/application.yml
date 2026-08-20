@@ -18,10 +18,12 @@ server:
 spring.lifecycle.timeout-per-shutdown-phase: 20s
 
 management:
+  server:
+    port: ${MANAGEMENT_SERVER_PORT:${SERVER_PORT:8080}}
   endpoints:
     web:
       exposure:
-        include: health,info,metrics,prometheus
+        include: health,info,prometheus
   endpoint:
     health:
       probes:
@@ -35,3 +37,8 @@ northstar:
     batch-size: ${SEED_BATCH_SIZE:1000}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:5173,http://127.0.0.1:5173}
+
+logging:
+  structured:
+    format:
+      console: ecs

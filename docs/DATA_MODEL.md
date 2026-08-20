@@ -1,22 +1,21 @@
-# Banking Analytics Data Model
+# Banking analytics data model
 
-This document defines the current demo schema and the recommended production model needed to calculate the dashboard metrics. The model separates stable master data, event history, governed metric facts, and operational telemetry.
+Northstar separates operational banking records from analytical read models. Java domain types enforce core invariants; Flyway owns the corresponding demo persistence schema. Dashboard values remain synthetic and `DEMO`-certified.
 
-## Domain model
+## Implemented model
 
 ```mermaid
 erDiagram
-    CUSTOMER ||--o{ ACCOUNT : owns
     CUSTOMER ||--o{ APPLICATION : submits
-    CUSTOMER ||--o{ MARKETING_TOUCHPOINT : receives
-    ACCOUNT ||--o{ TRANSACTION : posts
-    ACCOUNT ||--o{ DAILY_ACCOUNT_SNAPSHOT : summarized_as
-    ACCOUNT ||--o{ RATE_HISTORY : priced_by
-    APPLICATION ||--o| ACCOUNT : may_open
-    APPLICATION ||--o{ FRAUD_EVENT : may_trigger
-    TRANSACTION ||--o{ FRAUD_EVENT : may_trigger
+    CUSTOMER ||--o{ ACCOUNT : owns
+    PRODUCT ||--o{ APPLICATION : requested_as
     PRODUCT ||--o{ ACCOUNT : classifies
-    PRODUCT ||--o{ RATE_HISTORY : publishes
+    PRODUCT ||--o{ RATE_HISTORY : priced_by
+    APPLICATION o|--o| ACCOUNT : may_fund
+    ACCOUNT ||--o{ TRANSACTION : posts
+    APPLICATION o|--o{ FRAUD_EVENT : may_trigger
+    TRANSACTION o|--o{ FRAUD_EVENT : may_trigger
+    ACCOUNT ||--o{ DAILY_ACCOUNT_SNAPSHOT : summarized_as
     PRODUCT ||--o{ DAILY_PRODUCT_METRIC : aggregates
     METRIC_DEFINITION ||--o{ DAILY_PRODUCT_METRIC : governs
 
@@ -30,13 +29,25 @@ erDiagram
     }
     PRODUCT {
       varchar product_code PK
+      varchar display_name UK
       varchar product_family
       varchar customer_type
       boolean active
     }
+    APPLICATION {
+      bigint id PK
+      bigint customer_id FK
+      varchar product_code FK
+      varchar channel
+      varchar status
+      timestamptz submitted_at
+      timestamptz decisioned_at
+      timestamptz funded_at
+    }
     ACCOUNT {
       bigint id PK
       bigint customer_id FK
+      bigint application_id FK
       varchar product_code FK
       varchar status
       numeric balance
@@ -47,19 +58,28 @@ erDiagram
       bigint id PK
       bigint account_id FK
       numeric amount
+      char currency
       varchar transaction_type
-      timestamp occurred_at PK
+      timestamptz occurred_at PK
       boolean fraud_flag
     }
-    APPLICATION {
+    FRAUD_EVENT {
       bigint id PK
-      bigint customer_id FK
-      varchar product_code FK
-      varchar channel
+      bigint application_id FK
+      bigint transaction_id FK
+      timestamptz transaction_occurred_at FK
+      varchar event_type
       varchar status
-      timestamp submitted_at
-      timestamp decisioned_at
-      timestamp funded_at
+      numeric suspected_amount
+      numeric confirmed_loss
+      timestamptz detected_at
+    }
+    RATE_HISTORY {
+      varchar product_code PK,FK
+      timestamptz effective_at PK
+      numeric annual_rate
+      varchar offer_code
+      numeric benchmark_rate
     }
     DAILY_ACCOUNT_SNAPSHOT {
       bigint account_id PK,FK
@@ -70,38 +90,16 @@ erDiagram
       numeric inflow_amount
       numeric outflow_amount
       boolean churn_risk_flag
-    }
-    RATE_HISTORY {
-      varchar product_code PK,FK
-      timestamp effective_at PK
-      numeric annual_rate
-      varchar offer_code
-      numeric benchmark_rate
-    }
-    MARKETING_TOUCHPOINT {
-      bigint id PK
-      bigint customer_id FK
-      varchar channel
-      varchar campaign_code
-      timestamp occurred_at
-      numeric attributed_cost
-    }
-    FRAUD_EVENT {
-      bigint id PK
-      bigint application_id FK
-      bigint transaction_id FK
-      varchar event_type
-      varchar status
-      numeric suspected_amount
-      numeric confirmed_loss
-      timestamp detected_at
+      timestamptz source_watermark
+      timestamptz calculated_at
     }
     METRIC_DEFINITION {
       varchar metric_code PK
       varchar formula_version
       varchar owner
       varchar certification_status
-      timestamp effective_at
+      timestamptz effective_at
+      text lineage
     }
     DAILY_PRODUCT_METRIC {
       varchar metric_code PK,FK
@@ -109,89 +107,59 @@ erDiagram
       date metric_date PK
       numeric metric_value
       varchar formula_version
-      timestamp calculated_at
+      timestamptz source_watermark
+      timestamptz calculated_at
     }
 ```
 
-## Current demo tables
+## Code and persistence alignment
 
-The running demo uses three physical tables:
+| Concept | Java model | Persistence / role | State |
+|---|---|---|---|
+| Customer | `Customer` with segment, identity, region, and risk-score range | `customers` | Implemented and seeded |
+| Product | `Product` with code/family/customer type/active state | `products` | Implemented and seeded catalog |
+| Application | `ProductApplication` with channel/state timestamp invariants | `applications` | Implemented and seeded |
+| Deposit account | `DepositAccount` with balance and closure invariants | `accounts`; focused `AccountRepository` | Implemented and seeded |
+| Transaction | `BankingTransaction` and `Money`; external-flow semantics | `transactions`; focused `TransactionRepository` | Implemented, seeded, Timescale hypertable |
+| Fraud | `FraudEvent` with source and loss invariants | `fraud_events` | Implemented and seeded from flagged transactions |
+| Pricing | `RateHistoryEntry` with non-negative rates | `rate_history` | Implemented, seeded, Timescale hypertable |
+| Account analytics | `DailyAccountSnapshot` with non-negative aggregates | `daily_account_snapshots` | Implemented projection and seeded daily grain |
+| Governed metrics | `GovernedMetric.Definition` / `DailyValue` with certification, lineage, formula version, and watermark | `metric_definitions`, `daily_product_metrics`; focused `MetricDefinitionRepository` | Implemented projection; demo-certified |
+| Dashboard projection | `PortfolioMetrics` scoped by `PortfolioScope` | `AnalyticsProjectionRepository` | Deterministic demo adapter; production source deferred |
 
-| Table | Purpose | Storage |
-|---|---|---|
-| `customers` | Synthetic customer master with segment, region, and risk score | Standard PostgreSQL table |
-| `accounts` | Product relationship and current balance | Standard PostgreSQL table |
-| `transactions` | Dated deposits and payments | TimescaleDB hypertable partitioned by `occurred_at` |
+`AccountActivityService` demonstrates an operational use case across account and transaction ports. `MetricLineageService` queries governed definitions. `MetricsQueryService` stays on the CQRS-style analytical projection boundary and maps to API DTOs separately.
 
-The remaining dashboard metrics are currently deterministic demo values returned by the `DemoMetricsRepository` adapter. The repository port deliberately isolates that demo source from the application and HTTP layers, but it must be replaced by governed production facts before company use. Seeded transactions demonstrate storage and volume; they do not currently drive every displayed KPI.
+## Invariants and data quality
 
-Schema changes are versioned under `server/src/main/resources/db/migration` and applied by Flyway. Application startup does not use Hibernate schema mutation.
+- Risk scores are 300–850; customer/product identity is required and unique in persistence.
+- Deposit balances and snapshot measures cannot be negative. Closed accounts require a valid close date.
+- Transaction amounts are positive, carry currency, immutable event time, and a type that distinguishes internal transfers from external flows.
+- Application decisions cannot precede submission; funded applications require decision and funding timestamps.
+- Fraud events must reference an application or transaction; confirmed loss cannot exceed suspected amount.
+- Rates cannot be negative. Hypertable uniqueness includes the time partition.
+- Governed values record metric/formula version, calculation time, source watermark, owner, certification state, and human-readable lineage.
+- Demo aggregate facts are explicitly `DEMO`; they are not finance-certified.
 
-## Recommended production tables
+## Storage choices
 
-| Table | Grain | Why it exists |
-|---|---|---|
-| `products` | One row per product code and version | Separates business/consumer and checking/savings definitions from display labels |
-| `applications` | One row per submitted product application | Supports application, approval, funding, channel, and activation funnels |
-| `daily_account_snapshots` | One account per business date | Supports certified balances, net flows, dormancy, retention, and churn features |
-| `rate_history` | One product/offer per effective timestamp | Supports rate paid, deposit beta, promotion, and sensitivity analysis |
-| `marketing_touchpoints` | One customer interaction per timestamp | Supports channel conversion, attribution, and CAC |
-| `fraud_events` | One fraud alert or confirmed case | Separates suspected events, confirmed fraud, recoveries, and realized loss |
-| `metric_definitions` | One metric/formula version | Provides ownership, lineage, effective dates, and certification |
-| `daily_product_metrics` | One metric/product/business date | Serves fast governed dashboard reads and historical formula versions |
-| `technology_metric_samples` | One service/metric/timestamp | Supports availability, latency, freshness, and pipeline-health views |
-
-## TimescaleDB hypertables
-
-Use hypertables for append-heavy data queried by time range:
-
-- `transactions` partitioned by `occurred_at`.
-- `marketing_touchpoints` partitioned by `occurred_at` when volume justifies it.
-- `rate_history` partitioned by `effective_at` for large offer-level pricing history.
-- `technology_metric_samples` partitioned by `observed_at`.
-
-Keep customers, products, accounts, applications, metric definitions, and current reference data as ordinary relational tables. Choose chunk intervals from measured ingest volume and the most common reporting window rather than a fixed default.
+`transactions` and `rate_history` are TimescaleDB hypertables because they are append-heavy and time-window queried. Customer, product, application, account, fraud investigation, metric-definition, daily snapshot, and daily aggregate tables remain relational at current volume. Add hypertables only from measured ingest/query needs, with tested chunk, compression, retention, backup, and restore policies.
 
 ## Metric lineage
 
-| Dashboard metric | Primary facts | Required dimensions |
+| Dashboard metric | Intended authoritative facts | Required dimensions / controls |
 |---|---|---|
-| Total deposits | `daily_account_snapshots.ledger_balance` | Product, customer type, region, business date |
-| Net new money | External transaction inflows and outflows | Product, channel, transaction classification |
-| Net interest margin | Finance interest income/expense and average earning assets | Legal entity, product, month |
-| Fraud loss rate | `fraud_events.confirmed_loss` and eligible transaction value | Product, payment type, date |
-| Application funnel | `applications` timestamps and status | Product, channel, customer type, cohort |
-| Marketing CAC | `marketing_touchpoints.attributed_cost` and funded customers | Campaign, channel, product, cohort |
-| Deposit beta | `rate_history.annual_rate` and benchmark-rate history | Product, customer tier, rate cycle |
-| Churn and balances at risk | Account closures, snapshots, and approved model output | Product, cohort, risk band |
-| Checking engagement | Transactions, direct deposit, card and treasury flags | Checking subtype, customer type |
-| Savings behavior | Snapshots, recurring transfers, goals, and rate history | Savings subtype, balance tier |
-| Technology health | `technology_metric_samples` | Service, endpoint, environment, region |
+| Total deposits | `daily_account_snapshots.ledger_balance` | Product, customer type, region, business date; ledger reconciliation |
+| Net new money | External transaction inflows/outflows | Transfer classification, reversals, currency, date |
+| Fraud loss rate | `fraud_events.confirmed_loss` / eligible transaction value | Case status, payment type, product, date |
+| Application funnel | Application lifecycle timestamps/status | Product, channel, cohort, deduplication |
+| Deposit beta/rate paid | `rate_history` plus balance-weighted snapshots | Benchmark, offer, tier, rate-cycle policy |
+| Churn/balances at risk | Account state and approved model output in snapshots | Model/version/threshold, cohort, intervention |
+| Dashboard metric value | `daily_product_metrics` joined to definition | Formula version, watermark, certification, owner |
 
-## Keys and identity
+## Intentionally deferred enterprise extensions
 
-- Keep source-system identifiers in dedicated columns and issue internal surrogate keys for cross-source joins.
-- Maintain an identity crosswalk when a customer has multiple source identifiers.
-- Use immutable event identifiers plus event timestamps for deduplication.
-- TimescaleDB unique indexes on hypertables must include the time-partitioning column.
-- Never use email, phone number, or government identifiers as primary keys.
+Marketing touchpoints/CAC attribution, technology metric samples, multi-currency FX valuation, reversals/chargebacks, joint ownership, customer identity crosswalk, interest accrual, general-ledger feeds, model feature/decision stores, audit ledger, and CDC are documented integration work—not pretend implementations. Add them with migrations, domain semantics, ownership, retention, authorization, lineage, and reconciliation before claiming coverage.
 
-## Security classifications
+## Data classification
 
-| Classification | Examples | Minimum controls |
-|---|---|---|
-| Restricted customer data | Customer identity crosswalk, account numbers | Tokenization, field encryption, strict role access, audit logging |
-| Confidential financial data | Balances, transactions, fraud cases | TLS, encryption at rest, least privilege, retention policy |
-| Internal operational data | API latency, pipeline status | Environment isolation and operational role access |
-| Approved aggregates | Certified product-level metrics | Governed publication and formula versioning |
-
-Production analytics should use tokenized customer keys and masked account references unless clear-text access is explicitly approved.
-
-## Data-quality controls
-
-- Customer numbers and source event IDs must be unique within their source scope.
-- Account balances must reconcile to approved core-banking control totals.
-- Transaction timestamps, currency, reversal status, and internal-transfer classification are mandatory for flow metrics.
-- Application states must follow a controlled state transition model.
-- Every daily aggregate must record calculation time, source watermark, and formula version.
-- Late-arriving events must trigger a documented restatement policy rather than silently changing certified history.
+Customer identity crosswalks and account identifiers are restricted; balances, transactions, applications, pricing, and fraud cases are confidential; operational telemetry is internal; only approved aggregates should be broadly consumable. Production adaptations require tokenized identifiers, field/transport/storage encryption, purpose-limited authorization, immutable access auditing, retention/deletion/legal-hold controls, data residency review, and masking in lower environments. Never use email, phone, or government identifiers as database keys.

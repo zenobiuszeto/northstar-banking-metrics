@@ -12,7 +12,7 @@ import org.springframework.stereotype.Component;
 @Component
 class SyntheticDataFactory {
   private static final String[] PRODUCTS = {
-      "Business Checking", "Consumer Checking", "Business Savings", "Consumer Savings"
+      "BUSINESS_CHECKING", "CONSUMER_CHECKING", "BUSINESS_SAVINGS", "CONSUMER_SAVINGS"
   };
   private static final String[] REGIONS = {"West", "Southwest", "Midwest", "Northeast", "Southeast"};
   private final Clock clock;
@@ -24,7 +24,7 @@ class SyntheticDataFactory {
   Object[] customer(int ordinal) {
     SplittableRandom random = random(ordinal, 11);
     return new Object[] {
-        "CUS-%06d".formatted(ordinal), ordinal % 8 == 0 ? "Business" : "Consumer",
+        "CUS-%06d".formatted(ordinal), ordinal % 8 == 0 ? "BUSINESS" : "CONSUMER",
         REGIONS[ordinal % REGIONS.length], random.nextInt(300, 851),
         LocalDate.now(clock).minusDays(random.nextInt(30, 1460))
     };
@@ -37,7 +37,7 @@ class SyntheticDataFactory {
   Object[] account(long customerId, int ordinal) {
     SplittableRandom random = random(customerId, ordinal + 23);
     String product = PRODUCTS[(int) ((customerId + ordinal) % PRODUCTS.length)];
-    double upperBound = product.startsWith("Business") ? 250_000 : 45_000;
+    double upperBound = product.startsWith("BUSINESS") ? 250_000 : 45_000;
     return new Object[] {customerId, product, "OPEN", money(random.nextDouble(100, upperBound)),
         LocalDate.now(clock).minusDays(random.nextInt(15, 1200))};
   }
@@ -52,6 +52,17 @@ class SyntheticDataFactory {
     LocalDateTime occurredAt = LocalDateTime.now(clock).minusDays(random.nextInt(0, 365));
     return new Object[] {accountId, money(random.nextDouble(10, 12_000)),
         deposit ? "DEPOSIT" : "PAYMENT", Timestamp.valueOf(occurredAt), random.nextInt(10_000) < 42};
+  }
+
+  Object[] application(long customerId) {
+    SplittableRandom random = random(customerId, 71);
+    LocalDateTime submitted = LocalDateTime.now(clock).minusDays(random.nextInt(10, 365));
+    LocalDateTime decisioned = submitted.plusHours(random.nextInt(1, 72));
+    boolean funded = customerId % 5 != 0;
+    return new Object[] {customerId, PRODUCTS[(int) (customerId % PRODUCTS.length)],
+        customerId % 4 == 0 ? "BRANCH" : "DIGITAL", funded ? "FUNDED" : "DECLINED",
+        Timestamp.valueOf(submitted), Timestamp.valueOf(decisioned),
+        funded ? Timestamp.valueOf(decisioned.plusDays(random.nextInt(1, 8))) : null};
   }
 
   private SplittableRandom random(long identity, long salt) {

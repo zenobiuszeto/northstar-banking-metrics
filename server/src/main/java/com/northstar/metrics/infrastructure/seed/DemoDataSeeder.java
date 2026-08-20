@@ -9,8 +9,10 @@ import org.springframework.boot.ApplicationArguments;
 import org.springframework.boot.ApplicationRunner;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Component;
+import org.springframework.context.annotation.Profile;
 
 @Component
+@Profile("demo")
 class DemoDataSeeder implements ApplicationRunner {
   private static final Logger log = LoggerFactory.getLogger(DemoDataSeeder.class);
   private static final long SEED_LOCK = 6_614_947_283L;
@@ -49,19 +51,28 @@ class DemoDataSeeder implements ApplicationRunner {
       return;
     }
 
+    seedReferenceData();
     log.info("Generating {} synthetic customers in batches of {}", properties.customerCount(), properties.batchSize());
     batchRange(1, properties.customerCount(), factory::customer,
         "insert into customers(customer_number,segment,region,risk_score,created_at) values (?,?,?,?,?)");
 
     List<Long> customerIds = jdbc.queryForList("select id from customers order by id", Long.class);
+    List<Object[]> applications = new ArrayList<>(properties.batchSize());
+    for (long customerId : customerIds) {
+      if (customerId % 5 == 0) continue;
+      applications.add(factory.application(customerId));
+      flushWhenFull(applications, "insert into applications(customer_id,product_code,channel,status,submitted_at,decisioned_at,funded_at) values (?,?,?,?,?,?,?)");
+    }
+    flush(applications, "insert into applications(customer_id,product_code,channel,status,submitted_at,decisioned_at,funded_at) values (?,?,?,?,?,?,?)");
+
     List<Object[]> accounts = new ArrayList<>(properties.batchSize());
     for (long customerId : customerIds) {
       for (int ordinal = 0; ordinal < factory.accountCount(customerId); ordinal++) {
         accounts.add(factory.account(customerId, ordinal));
-        flushWhenFull(accounts, "insert into accounts(customer_id,product,status,balance,opened_at) values (?,?,?,?,?)");
+        flushWhenFull(accounts, "insert into accounts(customer_id,product_code,status,balance,opened_at) values (?,?,?,?,?)");
       }
     }
-    flush(accounts, "insert into accounts(customer_id,product,status,balance,opened_at) values (?,?,?,?,?)");
+    flush(accounts, "insert into accounts(customer_id,product_code,status,balance,opened_at) values (?,?,?,?,?)");
 
     List<Long> accountIds = jdbc.queryForList("select id from accounts order by id", Long.class);
     List<Object[]> transactions = new ArrayList<>(properties.batchSize());
@@ -72,7 +83,57 @@ class DemoDataSeeder implements ApplicationRunner {
       }
     }
     flush(transactions, "insert into transactions(account_id,amount,transaction_type,occurred_at,fraud_flag) values (?,?,?,?,?)");
-    log.info("Synthetic seed complete: {} customers, {} accounts", customerIds.size(), accountIds.size());
+    seedSnapshotsAndFraud(accountIds);
+    log.info("Synthetic seed complete: {} customers, {} accounts and bounded analytical facts", customerIds.size(), accountIds.size());
+  }
+
+  private void seedReferenceData() {
+    jdbc.update("""
+        insert into products(product_code,display_name,product_family,customer_type,active) values
+        ('BUSINESS_CHECKING','Business Checking','CHECKING','BUSINESS',true),
+        ('CONSUMER_CHECKING','Consumer Checking','CHECKING','CONSUMER',true),
+        ('BUSINESS_SAVINGS','Business Savings','SAVINGS','BUSINESS',true),
+        ('CONSUMER_SAVINGS','Consumer Savings','SAVINGS','CONSUMER',true)
+        on conflict (product_code) do nothing
+        """);
+    jdbc.update("""
+        insert into rate_history(product_code,effective_at,annual_rate,offer_code,benchmark_rate)
+        select product_code, now() - interval '30 days',
+          case when product_family='SAVINGS' then 0.0372 else 0.0010 end, 'STANDARD', 0.0525
+        from products on conflict do nothing
+        """);
+    jdbc.update("""
+        insert into metric_definitions(metric_code,formula_version,owner,certification_status,effective_at,lineage) values
+        ('TOTAL_DEPOSITS','demo-v1','Portfolio Analytics','DEMO',now(),'daily_account_snapshots.ledger_balance'),
+        ('APPLICATIONS','demo-v1','Growth Analytics','DEMO',now(),'applications.id'),
+        ('FRAUD_LOSS_RATE','demo-v1','Fraud Risk','DEMO',now(),'fraud_events.confirmed_loss / transactions.amount')
+        on conflict (metric_code) do nothing
+        """);
+  }
+
+  private void seedSnapshotsAndFraud(List<Long> accountIds) {
+    jdbc.update("""
+        insert into daily_account_snapshots(account_id,snapshot_date,ledger_balance,average_balance,
+          transaction_count,inflow_amount,outflow_amount,churn_risk_flag,source_watermark,calculated_at)
+        select a.id,current_date,a.balance,a.balance,count(t.id),
+          coalesce(sum(t.amount) filter (where t.transaction_type='DEPOSIT'),0),
+          coalesce(sum(t.amount) filter (where t.transaction_type<>'DEPOSIT'),0),c.risk_score < 560,now(),now()
+        from accounts a join customers c on c.id=a.customer_id
+        left join transactions t on t.account_id=a.id
+        group by a.id,c.risk_score
+        on conflict do nothing
+        """);
+    jdbc.update("""
+        insert into fraud_events(transaction_id,transaction_occurred_at,event_type,status,suspected_amount,confirmed_loss,detected_at)
+        select id,occurred_at,'PAYMENT_FRAUD','CONFIRMED',amount,round(amount * 0.70,2),occurred_at + interval '1 hour'
+        from transactions where fraud_flag on conflict do nothing
+        """);
+    jdbc.update("""
+        insert into daily_product_metrics(metric_code,product_code,metric_date,metric_value,formula_version,source_watermark,calculated_at)
+        select 'TOTAL_DEPOSITS',a.product_code,current_date,sum(s.ledger_balance),'demo-v1',now(),now()
+        from daily_account_snapshots s join accounts a on a.id=s.account_id group by a.product_code
+        on conflict do nothing
+        """);
   }
 
   private void batchRange(int start, int end, RowFactory rowFactory, String sql) {

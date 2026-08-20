@@ -7,13 +7,13 @@ import org.junit.jupiter.api.Test;
 
 class ProductTest {
   @Test
-  void resolvesDisplayNamesWithoutCaseSensitivity() {
-    assertThat(Product.fromDisplayName("business checking")).isEqualTo(Product.BUSINESS_CHECKING);
+  void resolvesDashboardScopesWithoutCaseSensitivity() {
+    assertThat(PortfolioScope.fromDisplayName("business checking")).isEqualTo(PortfolioScope.BUSINESS_CHECKING);
   }
 
   @Test
   void rejectsUnknownProducts() {
-    assertThatThrownBy(() -> Product.fromDisplayName("Credit Card"))
+    assertThatThrownBy(() -> PortfolioScope.fromDisplayName("Credit Card"))
         .isInstanceOf(IllegalArgumentException.class)
         .hasMessageContaining("Unsupported product");
   }
